@@ -47,7 +47,7 @@ const INITIAL_STATE: GameState = {
   rockets: [],
   playerMissiles: [],
   explosions: [],
-  level: 1,
+  level: 50,
 };
 
 export default function App() {
@@ -144,11 +144,11 @@ export default function App() {
 
     if (bestBatteryIndex !== -1) {
       const battery = gameState.batteries[bestBatteryIndex];
-      const isMiddleTriple = bestBatteryIndex === 1 && !isGravity;
+      const isTripleShot = !isGravity;
       
       const newMissiles: PlayerMissile[] = [];
       
-      if (isMiddleTriple) {
+      if (isTripleShot) {
         // Triple shot spread
         const offsets = [-25, 0, 25];
         offsets.forEach(offsetX => {
@@ -187,6 +187,47 @@ export default function App() {
     e.preventDefault();
     handleCanvasClick(e, true);
   };
+
+  const triggerMegaExplosion = useCallback(() => {
+    if (gameState.status !== 'PLAYING') return;
+
+    setGameState(prev => {
+      const clearedRocketsCount = prev.rockets.length;
+      const newExplosions: Explosion[] = [];
+      
+      // Create a grid of explosions to cover the screen
+      for (let x = 100; x < GAME_WIDTH; x += 200) {
+        for (let y = 100; y < GAME_HEIGHT; y += 200) {
+          newExplosions.push({
+            id: `mega-exp-${Math.random()}`,
+            pos: { x, y },
+            radius: 0,
+            maxRadius: 300,
+            life: 1,
+            isExpanding: true,
+          });
+        }
+      }
+
+      return {
+        ...prev,
+        score: prev.score + (clearedRocketsCount * SCORE_PER_ROCKET),
+        rockets: [],
+        explosions: [...prev.explosions, ...newExplosions],
+      };
+    });
+  }, [gameState.status]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        triggerMegaExplosion();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [triggerMegaExplosion]);
 
   const update = useCallback((time: number) => {
     if (gameState.status !== 'PLAYING') return;
