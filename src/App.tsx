@@ -55,7 +55,7 @@ const INITIAL_STATE: GameState = {
   rockets: [],
   playerMissiles: [],
   explosions: [],
-  level: 1,
+  level: 99,
 };
 
 export default function App() {
@@ -253,11 +253,57 @@ export default function App() {
       const nextCities = [...prev.cities];
       const nextBatteries = [...prev.batteries];
       let nextScore = prev.score;
+      let nextBoss = prev.boss ? { ...prev.boss } : undefined;
 
-      // 1. Spawn rockets
-      if (Math.random() < 0.015 + (prev.level * 0.003)) {
-        const r = spawnRocket();
-        if (r) nextRockets.push(r);
+      // 0. Boss Spawning (Every 10 levels)
+      if (!nextBoss && prev.level % 10 === 0 && prev.status === 'PLAYING') {
+        nextBoss = {
+          id: 'boss',
+          pos: { x: GAME_WIDTH / 2, y: -100 },
+          health: 200 + (prev.level / 10) * 100,
+          maxHealth: 200 + (prev.level / 10) * 100,
+          lives: 10,
+          lastShotTime: 0,
+        };
+      }
+
+      // 0.1 Update Boss
+      if (nextBoss) {
+        // Move boss into view
+        if (nextBoss.pos.y < 100) {
+          nextBoss.pos.y += 1;
+        } else {
+          // Hover movement
+          nextBoss.pos.x = GAME_WIDTH / 2 + Math.sin(time / 1000) * 200;
+          
+          // Boss Shooting
+          if (time - nextBoss.lastShotTime > 2000 - (prev.level / 10) * 100) {
+            nextBoss.lastShotTime = time;
+            // Shoot 3 rockets at random cities/batteries
+            for (let i = 0; i < 3; i++) {
+              const targets = [...nextCities, ...nextBatteries].filter(e => !e.isDestroyed);
+              if (targets.length > 0) {
+                const target = targets[Math.floor(Math.random() * targets.length)];
+                nextRockets.push({
+                  id: `boss-rocket-${Math.random()}`,
+                  start: { ...nextBoss.pos },
+                  target: { ...target.pos },
+                  pos: { ...nextBoss.pos },
+                  progress: 0,
+                  speed: ROCKET_SPEED_BASE * 1.5,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // 1. Spawn rockets (only if boss is not present or boss is active)
+      if (!nextBoss || nextBoss.pos.y >= 100) {
+        if (Math.random() < 0.015 + (prev.level * 0.003)) {
+          const r = spawnRocket();
+          if (r) nextRockets.push(r);
+        }
       }
 
       // 2. Update Rockets
@@ -353,7 +399,7 @@ export default function App() {
           }
         }
 
-        // Check if explosion hits rockets
+        // Check if explosion hits rockets or boss
         for (let j = nextRockets.length - 1; j >= 0; j--) {
           const r = nextRockets[j];
           const dx = r.pos.x - e.pos.x;
@@ -380,6 +426,48 @@ export default function App() {
             });
           }
         }
+
+        // Check if explosion hits boss
+        if (nextBoss) {
+          const dx = nextBoss.pos.x - e.pos.x;
+          const dy = nextBoss.pos.y - e.pos.y;
+          const dist = Math.sqrt(dx ** 2 + dy ** 2);
+          if (dist < e.radius + 30) {
+            nextBoss.health -= 0.5; // Continuous damage while in explosion
+            if (nextBoss.health <= 0) {
+              if (nextBoss.lives > 1) {
+                nextBoss.lives -= 1;
+                nextBoss.health = nextBoss.maxHealth;
+                // Small explosion for losing a life
+                nextExplosions.push({
+                  id: `boss-life-exp-${Math.random()}`,
+                  pos: { ...nextBoss.pos },
+                  radius: 0,
+                  maxRadius: 60,
+                  life: 1,
+                  isExpanding: true,
+                });
+              } else {
+                nextScore += 5000;
+                // Big explosion for boss
+                for (let k = 0; k < 5; k++) {
+                  nextExplosions.push({
+                    id: `boss-exp-${Math.random()}`,
+                    pos: { 
+                      x: nextBoss.pos.x + (Math.random() - 0.5) * 60, 
+                      y: nextBoss.pos.y + (Math.random() - 0.5) * 40 
+                    },
+                    radius: 0,
+                    maxRadius: 100,
+                    life: 1,
+                    isExpanding: true,
+                  });
+                }
+                nextBoss = undefined;
+              }
+            }
+          }
+        }
       }
 
       // Win/Loss conditions
@@ -400,6 +488,7 @@ export default function App() {
         explosions: nextExplosions,
         cities: nextCities,
         batteries: nextBatteries,
+        boss: nextBoss,
       };
     });
 
@@ -424,12 +513,71 @@ export default function App() {
     ctx.fillStyle = '#02040a';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
+    // Draw Milky Way (Galaxy Band)
+    const galaxyGradient = ctx.createLinearGradient(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    galaxyGradient.addColorStop(0, 'rgba(10, 10, 30, 0)');
+    galaxyGradient.addColorStop(0.3, 'rgba(50, 20, 80, 0.15)');
+    galaxyGradient.addColorStop(0.5, 'rgba(80, 40, 120, 0.2)');
+    galaxyGradient.addColorStop(0.7, 'rgba(50, 20, 80, 0.15)');
+    galaxyGradient.addColorStop(1, 'rgba(10, 10, 30, 0)');
+    ctx.fillStyle = galaxyGradient;
+    ctx.beginPath();
+    ctx.ellipse(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH * 0.8, GAME_HEIGHT * 0.3, Math.PI / 4, 0, Math.PI * 2);
+    ctx.fill();
+
     // Draw Stars
     STARS.forEach(star => {
       ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
       ctx.beginPath();
       ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
       ctx.fill();
+    });
+
+    // Draw Black Hole (Top Left)
+    const bhX = 150, bhY = 120;
+    // Accretion Disk
+    const bhGradient = ctx.createRadialGradient(bhX, bhY, 10, bhX, bhY, 40);
+    bhGradient.addColorStop(0, 'rgba(255, 200, 50, 0.9)');
+    bhGradient.addColorStop(0.4, 'rgba(255, 100, 0, 0.6)');
+    bhGradient.addColorStop(1, 'rgba(255, 50, 0, 0)');
+    ctx.fillStyle = bhGradient;
+    ctx.beginPath();
+    ctx.ellipse(bhX, bhY, 50, 15, Math.PI / 6, 0, Math.PI * 2);
+    ctx.fill();
+    // Event Horizon
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(bhX, bhY, 12, 0, Math.PI * 2);
+    ctx.fill();
+    // Lens effect glow
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bhX, bhY, 15, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Draw Solar System (Center-ish Top)
+    const ssX = 400, ssY = 100;
+    // Sun
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#f1c40f';
+    ctx.fillStyle = '#f39c12';
+    ctx.beginPath(); ctx.arc(ssX, ssY, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Planets (Simplified)
+    const planets = [
+      { d: 25, s: 2, c: '#95a5a6', a: 0.5 }, // Mercury
+      { d: 40, s: 4, c: '#e67e22', a: 1.2 }, // Venus
+      { d: 60, s: 4.5, c: '#3498db', a: 2.5 }, // Earth
+      { d: 80, s: 3.5, c: '#e74c3c', a: 4.0 }, // Mars
+    ];
+    planets.forEach(p => {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.beginPath(); ctx.arc(ssX, ssY, p.d, 0, Math.PI * 2); ctx.stroke();
+      const px = ssX + Math.cos(p.a) * p.d;
+      const py = ssY + Math.sin(p.a) * p.d;
+      ctx.fillStyle = p.c;
+      ctx.beginPath(); ctx.arc(px, py, p.s, 0, Math.PI * 2); ctx.fill();
     });
 
     // Draw Moon
@@ -496,6 +644,54 @@ export default function App() {
         });
       }
     });
+
+    // Draw Boss
+    if (gameState.boss) {
+      const boss = gameState.boss;
+      // Boss Body
+      ctx.fillStyle = '#2c3e50';
+      ctx.beginPath();
+      ctx.ellipse(boss.pos.x, boss.pos.y, 60, 25, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#34495e';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Boss Dome
+      ctx.fillStyle = 'rgba(155, 89, 182, 0.6)';
+      ctx.beginPath();
+      ctx.arc(boss.pos.x, boss.pos.y - 5, 25, Math.PI, 0);
+      ctx.fill();
+
+      // Boss Lights
+      const time = Date.now() / 150;
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2 + time;
+        const lx = boss.pos.x + Math.cos(angle) * 50;
+        const ly = boss.pos.y + Math.sin(angle) * 15;
+        ctx.fillStyle = i % 2 === 0 ? '#e74c3c' : '#f1c40f';
+        ctx.beginPath();
+        ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Health Bar
+      const barWidth = 120;
+      const healthPercent = boss.health / boss.maxHealth;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(boss.pos.x - barWidth / 2, boss.pos.y - 60, barWidth, 6);
+      ctx.fillStyle = healthPercent > 0.3 ? '#2ecc71' : '#e74c3c';
+      ctx.fillRect(boss.pos.x - barWidth / 2, boss.pos.y - 60, barWidth * healthPercent, 6);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boss.pos.x - barWidth / 2, boss.pos.y - 60, barWidth, 6);
+
+      // Lives Count
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(`LIVES: ${boss.lives}`, boss.pos.x, boss.pos.y - 70);
+    }
 
     // Draw Rockets (Alien Spaceships)
     gameState.rockets.forEach(r => {

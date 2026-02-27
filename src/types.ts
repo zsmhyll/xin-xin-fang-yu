@@ -46,6 +46,13 @@ export interface Battery extends Entity {
 
 export type GameStatus = 'START' | 'PLAYING' | 'WON' | 'LOST';
 
+export interface Boss extends Entity {
+  health: number;
+  maxHealth: number;
+  lives: number;
+  lastShotTime: number;
+}
+
 export interface GameState {
   score: number;
   status: GameStatus;
@@ -55,4 +62,5 @@ export interface GameState {
   playerMissiles: PlayerMissile[];
   explosions: Explosion[];
   level: number;
+  boss?: Boss;
 }
