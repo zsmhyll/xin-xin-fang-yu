@@ -23,6 +23,8 @@ export interface PlayerMissile extends Entity {
   speed: number;
   originBatteryIndex: number;
   isGravityBomb?: boolean;
+  targetId?: string;
+  targetRank?: number;
 }
 
 export interface Explosion extends Entity {

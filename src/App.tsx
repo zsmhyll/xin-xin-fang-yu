@@ -29,6 +29,14 @@ import {
   Point 
 } from './types';
 
+// Pre-generate stars for the background
+const STARS = Array.from({ length: 100 }, () => ({
+  x: Math.random() * GAME_WIDTH,
+  y: Math.random() * GAME_HEIGHT,
+  size: Math.random() * 2,
+  opacity: Math.random() * 0.8 + 0.2,
+}));
+
 const INITIAL_STATE: GameState = {
   score: 0,
   status: 'START',
@@ -47,7 +55,7 @@ const INITIAL_STATE: GameState = {
   rockets: [],
   playerMissiles: [],
   explosions: [],
-  level: 50,
+  level: 1,
 };
 
 export default function App() {
@@ -67,7 +75,7 @@ export default function App() {
       nextLevel: "下一关",
       lose: "任务失败",
       restart: "再玩一次",
-      description: "保护城市免受敌方导弹袭击。左键发射拦截导弹，右键发射引力弹。",
+      description: "保护城市免受敌方导弹袭击。左键发射拦截导弹，空格键全屏爆炸。",
       missiles: "导弹",
       targetScore: "目标分数",
       currentLevel: "当前关卡",
@@ -81,7 +89,7 @@ export default function App() {
       nextLevel: "Next Level",
       lose: "Mission Failed",
       restart: "Play Again",
-      description: "Protect cities from enemy missiles. Left-click for interceptors, right-click for gravity bombs.",
+      description: "Protect cities from enemy missiles. Left-click for interceptors, Space for mega explosion.",
       missiles: "Missiles",
       targetScore: "Target Score",
       currentLevel: "Level",
@@ -151,16 +159,22 @@ export default function App() {
       if (isTripleShot) {
         // Triple shot spread
         const offsets = [-25, 0, 25];
-        offsets.forEach(offsetX => {
+        const barrelOffsets = [-6, 0, 6]; // Visual offsets for the 3 laser lines
+        offsets.forEach((offsetX, index) => {
+          const startPos = { 
+            x: battery.pos.x + barrelOffsets[index], 
+            y: battery.pos.y - 30 
+          };
           newMissiles.push({
             id: `missile-${Math.random()}`,
-            start: { ...battery.pos },
+            start: startPos,
             target: { x: x + offsetX, y: y },
-            pos: { ...battery.pos },
+            pos: { ...startPos },
             progress: 0,
             speed: PLAYER_MISSILE_SPEED,
             originBatteryIndex: bestBatteryIndex,
             isGravityBomb: false,
+            targetRank: index,
           });
         });
       } else {
@@ -185,7 +199,7 @@ export default function App() {
 
   const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    handleCanvasClick(e, true);
+    setGameState(INITIAL_STATE);
   };
 
   const triggerMegaExplosion = useCallback(() => {
@@ -277,20 +291,48 @@ export default function App() {
       // 3. Update Player Missiles
       for (let i = nextPlayerMissiles.length - 1; i >= 0; i--) {
         const m = nextPlayerMissiles[i];
-        m.progress += m.speed;
-        m.pos.x = m.start.x + (m.target.x - m.start.x) * m.progress;
-        m.pos.y = m.start.y + (m.target.y - m.start.y) * m.progress;
+        
+        // Tracking logic: Find target based on rank
+        let targetPos = m.target;
+        if (nextRockets.length > 0) {
+          // Sort rockets by distance to missile
+          const sortedRockets = [...nextRockets].sort((a, b) => {
+            const da = Math.sqrt((a.pos.x - m.pos.x) ** 2 + (a.pos.y - m.pos.y) ** 2);
+            const db = Math.sqrt((b.pos.x - m.pos.x) ** 2 + (b.pos.y - m.pos.y) ** 2);
+            return da - db;
+          });
+          
+          // Pick rocket based on rank (0, 1, 2)
+          const rank = m.targetRank || 0;
+          const targetRocket = sortedRockets[Math.min(rank, sortedRockets.length - 1)];
+          
+          if (targetRocket) {
+            targetPos = targetRocket.pos;
+            m.target = { ...targetPos };
+          }
+        }
 
-        if (m.progress >= 1) {
+        const dx = targetPos.x - m.pos.x;
+        const dy = targetPos.y - m.pos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        // Move towards target
+        const moveDist = m.speed * 500; // Convert progress-speed to pixel-speed
+        if (dist <= moveDist) {
+          m.pos.x = targetPos.x;
+          m.pos.y = targetPos.y;
           nextExplosions.push({
             id: `exp-p-${Math.random()}`,
-            pos: { ...m.target },
+            pos: { ...m.pos },
             radius: 0,
             maxRadius: m.isGravityBomb ? EXPLOSION_MAX_RADIUS * 2 : EXPLOSION_MAX_RADIUS,
             life: 1,
             isExpanding: true,
           });
           nextPlayerMissiles.splice(i, 1);
+        } else {
+          m.pos.x += (dx / dist) * moveDist;
+          m.pos.y += (dy / dist) * moveDist;
         }
       }
 
@@ -378,74 +420,139 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear
-    ctx.fillStyle = '#0a0a0a';
+    // Clear - Space Background
+    ctx.fillStyle = '#02040a';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Draw Ground
-    ctx.fillStyle = '#1a1a1a';
+    // Draw Stars
+    STARS.forEach(star => {
+      ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+      ctx.beginPath();
+      ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw Moon
+    ctx.fillStyle = '#e0e0e0';
+    ctx.beginPath();
+    ctx.arc(700, 80, 40, 0, Math.PI * 2);
+    ctx.fill();
+    // Moon Craters
+    ctx.fillStyle = '#bdbdbd';
+    ctx.beginPath(); ctx.arc(685, 70, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(715, 95, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(705, 65, 5, 0, Math.PI * 2); ctx.fill();
+
+    // Draw Ground (Lunar Surface)
+    ctx.fillStyle = '#2c3e50';
     ctx.fillRect(0, GAME_HEIGHT - 10, GAME_WIDTH, 10);
 
-    // Draw Cities
+    // Draw Cities (Space Stations)
     gameState.cities.forEach(city => {
       if (city.isDestroyed) {
-        ctx.fillStyle = '#333';
+        ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(city.pos.x - 15, city.pos.y - 5, 30, 5);
       } else {
-        ctx.fillStyle = '#4a90e2';
-        ctx.fillRect(city.pos.x - 15, city.pos.y - 15, 30, 15);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(city.pos.x - 10, city.pos.y - 10, 5, 5);
-        ctx.fillRect(city.pos.x + 5, city.pos.y - 10, 5, 5);
+        ctx.fillStyle = '#34495e';
+        ctx.fillRect(city.pos.x - 15, city.pos.y - 20, 30, 20);
+        ctx.fillStyle = '#3498db';
+        ctx.beginPath();
+        ctx.arc(city.pos.x, city.pos.y - 20, 15, Math.PI, 0);
+        ctx.fill();
+        // Windows
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(city.pos.x - 8, city.pos.y - 12, 4, 4);
+        ctx.fillRect(city.pos.x + 4, city.pos.y - 12, 4, 4);
       }
     });
 
-    // Draw Batteries
+    // Draw Batteries (Laser Turrets)
     gameState.batteries.forEach(b => {
       if (b.isDestroyed) {
-        ctx.fillStyle = '#333';
+        ctx.fillStyle = '#1a1a1a';
         ctx.beginPath();
         ctx.arc(b.pos.x, b.pos.y, 10, 0, Math.PI, true);
         ctx.fill();
       } else {
-        ctx.fillStyle = '#e74c3c';
+        ctx.fillStyle = '#7f8c8d';
         ctx.beginPath();
         ctx.arc(b.pos.x, b.pos.y, 20, 0, Math.PI, true);
         ctx.fill();
-        // Barrel
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(b.pos.x, b.pos.y - 10);
-        ctx.lineTo(b.pos.x, b.pos.y - 25);
-        ctx.stroke();
+        
+        // 3 Barrels
+        const barrelOffsets = [-6, 0, 6];
+        barrelOffsets.forEach(offsetX => {
+          ctx.strokeStyle = '#95a5a6';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(b.pos.x + offsetX, b.pos.y - 10);
+          ctx.lineTo(b.pos.x + offsetX, b.pos.y - 30);
+          ctx.stroke();
+          
+          // Barrel Glow
+          ctx.strokeStyle = 'rgba(52, 152, 219, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
       }
     });
 
-    // Draw Rockets
-    ctx.strokeStyle = '#ff4444';
-    ctx.lineWidth = 1;
+    // Draw Rockets (Alien Spaceships)
     gameState.rockets.forEach(r => {
+      // Subtle Trail
+      ctx.strokeStyle = 'rgba(155, 89, 182, 0.2)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(r.start.x, r.start.y);
       ctx.lineTo(r.pos.x, r.pos.y);
       ctx.stroke();
       
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(r.pos.x - 1, r.pos.y - 1, 2, 2);
+      // UFO Body (Oval)
+      ctx.fillStyle = '#bdc3c7';
+      ctx.beginPath();
+      ctx.ellipse(r.pos.x, r.pos.y, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // UFO Cockpit (Dome)
+      ctx.fillStyle = 'rgba(52, 152, 219, 0.8)';
+      ctx.beginPath();
+      ctx.arc(r.pos.x, r.pos.y - 2, 5, Math.PI, 0);
+      ctx.fill();
+      
+      // UFO Lights
+      const time = Date.now() / 200;
+      const lightColor = Math.sin(time + parseInt(r.id.split('-')[1] || '0')) > 0 ? '#e74c3c' : '#f1c40f';
+      ctx.fillStyle = lightColor;
+      ctx.beginPath(); ctx.arc(r.pos.x - 6, r.pos.y + 1, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(r.pos.x, r.pos.y + 2, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(r.pos.x + 6, r.pos.y + 1, 1.5, 0, Math.PI * 2); ctx.fill();
     });
 
-    // Draw Player Missiles
+    // Draw Player Missiles (Lasers)
     gameState.playerMissiles.forEach(m => {
-      ctx.strokeStyle = m.isGravityBomb ? '#a29bfe' : '#44ff44';
-      ctx.lineWidth = m.isGravityBomb ? 2 : 1;
+      const color = m.isGravityBomb ? '#a29bfe' : '#00f2ff';
+      
+      // Laser Beam
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = m.isGravityBomb ? 2 : 1.5;
       ctx.beginPath();
       ctx.moveTo(m.start.x, m.start.y);
       ctx.lineTo(m.pos.x, m.pos.y);
       ctx.stroke();
+      
+      // Core
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(m.start.x, m.start.y);
+      ctx.lineTo(m.pos.x, m.pos.y);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
 
       // Target X
-      ctx.strokeStyle = '#fff';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(m.target.x - 5, m.target.y - 5);
